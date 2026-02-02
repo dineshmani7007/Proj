@@ -1,10 +1,9 @@
 import streamlit as st
 import pandas as pd
 import pickle
-from sklearn.preprocessing import StandardScaler
 
 # ---------------------------------
-# Streamlit Page Configuration
+# Streamlit Page Config
 # ---------------------------------
 st.set_page_config(page_title="Rugby Match Predictor", layout="centered")
 
@@ -12,41 +11,36 @@ st.title("Premiership Rugby 2025 — Match Predictor")
 st.markdown("Predict the winner using **Decision Tree**, **Random Forest**, and **SVC** models.")
 
 # ---------------------------------
-# Step 1: Load Data & Models
+# Load Models & Data
 # ---------------------------------
 @st.cache_resource
 def load_models():
-    try:
-        with open("DecisionTree_model.pkl", "rb") as f:
-            dt_model = pickle.load(f)
-        with open("RandomForest_model.pkl", "rb") as f:
-            rf_model = pickle.load(f)
-        with open("SVC_model.pkl", "rb") as f:
-            svc_model = pickle.load(f)
-        with open("scaler.pkl", "rb") as f:
-            scaler = pickle.load(f)
-        df = pd.read_csv("rugby_data.csv")
-        return df, dt_model, rf_model, svc_model, scaler
-    except FileNotFoundError as e:
-        st.error(f"Required file not found: {e}")
-        st.stop()
+    with open("DecisionTree_model.pkl", "rb") as f:
+        dt_model = pickle.load(f)
+    with open("RandomForest_model.pkl", "rb") as f:
+        rf_model = pickle.load(f)
+    with open("SVC_model.pkl", "rb") as f:
+        svc_model = pickle.load(f)
+    with open("scaler.pkl", "rb") as f:
+        scaler = pickle.load(f)
+    df = pd.read_csv("rugby_data.csv")
+    return df, dt_model, rf_model, svc_model, scaler
 
 df, dt_model, rf_model, svc_model, scaler = load_models()
 st.success("Models and data loaded successfully!")
 
 # ---------------------------------
-# Step 2: Show Dataset
+# Show Dataset
 # ---------------------------------
 with st.expander("View Dataset"):
-    st.dataframe(df.head())
+    st.dataframe(df)
 
 teams = sorted(set(df["Team_A"]).union(df["Team_B"]))
 
 # ---------------------------------
-# Step 3: Match Prediction UI
+# Match Prediction UI
 # ---------------------------------
 st.header("Predict a Match Result")
-
 col1, col2 = st.columns(2)
 team_a = col1.selectbox("Home Team", teams)
 team_b = col2.selectbox("Away Team", teams)
@@ -56,7 +50,7 @@ if team_a == team_b:
     st.stop()
 
 # ---------------------------------
-# Step 4: Feature Engineering
+# Feature Engineering
 # ---------------------------------
 team_matches = df[((df["Team_A"] == team_a) & (df["Team_B"] == team_b)) |
                   ((df["Team_A"] == team_b) & (df["Team_B"] == team_a))]
@@ -64,7 +58,7 @@ team_matches = df[((df["Team_A"] == team_a) & (df["Team_B"] == team_b)) |
 if team_matches.empty:
     team_a_avg = df[df["Team_A"] == team_a]["Score_diff"].mean()
     team_b_avg = df[df["Team_A"] == team_b]["Score_diff"].mean()
-    avg_diff = 0 if pd.isna(team_a_avg) or pd.isna(team_b_avg) else (team_a_avg - team_b_avg) / 2
+    avg_diff = 0 if pd.isna(team_a_avg) or pd.isna(team_b_avg) else (team_a_avg - team_b_avg)/2
     note = "No direct match data — using average team performance."
 else:
     team_a_diff = team_matches.loc[team_matches["Team_A"] == team_a, "Score_diff"].mean()
@@ -76,7 +70,7 @@ X_sample = pd.DataFrame({"Score_diff": [avg_diff]})
 X_scaled = scaler.transform(X_sample)
 
 # ---------------------------------
-# Step 5: Predictions
+# Predictions
 # ---------------------------------
 models = {
     "Decision Tree": dt_model,
@@ -91,13 +85,12 @@ for name, model in models.items():
     predictions[name] = winner
 
 # ---------------------------------
-# Step 6: Display Results
+# Display Results
 # ---------------------------------
 st.subheader("Predicted Winners:")
 for name, winner in predictions.items():
     st.write(f"**{name}** → {winner}")
 
 st.info(f"Note: {note}")
-
 st.markdown("---")
 st.caption("Developed by Dinesh | Rugby Match Winner Predictor")
