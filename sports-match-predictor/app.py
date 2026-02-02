@@ -2,6 +2,12 @@ import streamlit as st
 import pandas as pd
 import pickle
 import os
+import requests
+from sklearn.preprocessing import StandardScaler
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.model_selection import train_test_split
 
 # ---------------------------------
 # Streamlit Page Config
@@ -11,45 +17,115 @@ st.title("Premiership Rugby 2025 — Match Predictor")
 st.markdown("Predict the winner using **Decision Tree**, **Random Forest**, and **SVC** models.")
 
 # ---------------------------------
-# Step 0: Check for CSV and model files
+# Step 0: Ensure CSV exists
 # ---------------------------------
 CSV_FILE = "rugby_data_report.csv"
 MODEL_FILES = ["DecisionTree_model.pkl", "RandomForest_model.pkl", "SVC_model.pkl", "scaler.pkl"]
 
-if not os.path.exists(CSV_FILE) or not all(os.path.exists(f) for f in MODEL_FILES):
-    st.error("Required files are missing! Please run the training script first.")
-    st.stop()
+def fetch_and_prepare_data():
+    """Fetch live JSON and create the processed CSV."""
+    st.info("Fetching Premiership Rugby 2025 data from live feed...")
+    url = "https://fixturedownload.com/feed/json/premiership-rugby-2025"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+    except Exception as e:
+        st.error(f"Failed to fetch live data: {e}")
+        st.stop()
+
+    df = pd.DataFrame(data)
+    df = df.dropna(subset=["HomeTeamScore", "AwayTeamScore"])
+    df = df[df["HomeTeamScore"] != ""]
+    df = df[df["AwayTeamScore"] != ""]
+    df = df[["HomeTeam", "AwayTeam", "HomeTeamScore", "AwayTeamScore"]]
+    df = df.rename(columns={
+        "HomeTeam": "Team_A",
+        "AwayTeam": "Team_B",
+        "HomeTeamScore": "Score_A",
+        "AwayTeamScore": "Score_B"
+    })
+    df["Score_A"] = df["Score_A"].astype(int)
+    df["Score_B"] = df["Score_B"].astype(int)
+    df["Score_diff"] = df["Score_A"] - df["Score_B"]
+    df["Winner_flag"] = (df["Score_A"] > df["Score_B"]).astype(int)
+    df.to_csv(CSV_FILE, index=False)
+    st.success("Data fetched and CSV created successfully!")
+    return df
 
 # ---------------------------------
-# Step 1: Load models and data
+# Step 1: Train models if missing
+# ---------------------------------
+def train_and_save_models(df):
+    X = df[["Score_diff"]]
+    y = df["Winner_flag"]
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+    dt_model = DecisionTreeClassifier(max_depth=3, random_state=42)
+    dt_model.fit(X_train, y_train)
+
+    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf_model.fit(X_train, y_train)
+
+    svc_model = SVC(kernel='linear', probability=True, random_state=42)
+    svc_model.fit(X_train, y_train)
+
+    # Save models and scaler
+    with open("DecisionTree_model.pkl", "wb") as f:
+        pickle.dump(dt_model, f)
+    with open("RandomForest_model.pkl", "wb") as f:
+        pickle.dump(rf_model, f)
+    with open("SVC_model.pkl", "wb") as f:
+        pickle.dump(svc_model, f)
+    with open("scaler.pkl", "wb") as f:
+        pickle.dump(scaler, f)
+
+    st.success("Models trained and saved successfully!")
+    return dt_model, rf_model, svc_model, scaler
+
+# ---------------------------------
+# Step 2: Load data and models
 # ---------------------------------
 @st.cache_resource
-def load_models_and_data():
-    df = pd.read_csv(CSV_FILE)
-    with open("DecisionTree_model.pkl", "rb") as f:
-        dt_model = pickle.load(f)
-    with open("RandomForest_model.pkl", "rb") as f:
-        rf_model = pickle.load(f)
-    with open("SVC_model.pkl", "rb") as f:
-        svc_model = pickle.load(f)
-    with open("scaler.pkl", "rb") as f:
-        scaler = pickle.load(f)
+def load_data_and_models():
+    # CSV
+    if not os.path.exists(CSV_FILE):
+        df = fetch_and_prepare_data()
+    else:
+        df = pd.read_csv(CSV_FILE)
+
+    # Models
+    missing_models = any(not os.path.exists(f) for f in MODEL_FILES)
+    if missing_models:
+        dt_model, rf_model, svc_model, scaler = train_and_save_models(df)
+    else:
+        with open("DecisionTree_model.pkl", "rb") as f:
+            dt_model = pickle.load(f)
+        with open("RandomForest_model.pkl", "rb") as f:
+            rf_model = pickle.load(f)
+        with open("SVC_model.pkl", "rb") as f:
+            svc_model = pickle.load(f)
+        with open("scaler.pkl", "rb") as f:
+            scaler = pickle.load(f)
+
     return df, dt_model, rf_model, svc_model, scaler
 
-df, dt_model, rf_model, svc_model, scaler = load_models_and_data()
-st.success("Models and data loaded successfully!")
+df, dt_model, rf_model, svc_model, scaler = load_data_and_models()
 
 # ---------------------------------
-# Step 2: Show Dataset
+# Step 3: Show dataset
 # ---------------------------------
 with st.expander("View Processed Data"):
     st.dataframe(df)
 
-# Unique teams
 teams = sorted(set(df["Team_A"]).union(df["Team_B"]))
 
 # ---------------------------------
-# Step 3: Match Prediction UI
+# Step 4: Match Prediction UI
 # ---------------------------------
 st.header("Predict a Match Result")
 col1, col2 = st.columns(2)
@@ -61,7 +137,7 @@ if team_a == team_b:
     st.stop()
 
 # ---------------------------------
-# Step 4: Feature Engineering
+# Step 5: Feature Engineering
 # ---------------------------------
 team_matches = df[((df["Team_A"] == team_a) & (df["Team_B"] == team_b)) |
                   ((df["Team_A"] == team_b) & (df["Team_B"] == team_a))]
@@ -81,7 +157,7 @@ X_sample = pd.DataFrame({"Score_diff": [avg_diff]})
 X_scaled = scaler.transform(X_sample)
 
 # ---------------------------------
-# Step 5: Make Predictions
+# Step 6: Predictions
 # ---------------------------------
 models = {
     "Decision Tree": dt_model,
@@ -96,7 +172,7 @@ for name, model in models.items():
     predictions[name] = winner
 
 # ---------------------------------
-# Step 6: Display Results
+# Step 7: Display Results
 # ---------------------------------
 st.subheader("Predicted Winners:")
 for name, winner in predictions.items():
